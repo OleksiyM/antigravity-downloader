@@ -95,6 +95,11 @@ def get_latest_downloads(os_key, arch_key):
             
             if appimage_url:
                 results["Antigravity 2 (AppImage)"] = {"version": version, "url": appimage_url}
+                # Construct tar.gz package url based on AppImage's folder path
+                # e.g. https://storage.googleapis.com/.../linux-x64/Antigravity.AppImage -> .../linux-x64/Antigravity.tar.gz
+                base_dir_url = appimage_url.rsplit("/", 1)[0]
+                tar_url = f"{base_dir_url}/Antigravity.tar.gz"
+                results["Antigravity 2 (Tarball Archive)"] = {"version": version, "url": tar_url}
             if deb_url:
                 results["Antigravity 2 (Debian Package)"] = {"version": version, "url": deb_url}
             if not appimage_url and not deb_url and urls:
