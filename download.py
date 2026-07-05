@@ -17,7 +17,6 @@ import requests
 MANIFEST_BASE_URLS = {
     "Antigravity 2 (App)": "https://antigravity-hub-auto-updater-974169037036.us-central1.run.app/manifest",
     "Antigravity IDE": "https://antigravity-ide-auto-updater-974169037036.us-central1.run.app",
-    "Antigravity CLI (agy)": "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app",
 }
 
 DEFAULT_DOWNLOAD_DIR = Path.home() / "Downloads"
@@ -84,7 +83,7 @@ def get_latest_downloads(os_key, arch_key):
             # Windows builds
             exe_url = next((u for u in urls if ".exe" in u), None)
             if exe_url:
-                results["Antigravity 2 (Installer)"] = {"version": version, "url": exe_url}
+                results["Antigravity 2 (EXE)"] = {"version": version, "url": exe_url}
             else:
                 for idx, u in enumerate(urls, 1):
                     results[f"Antigravity 2 (Option {idx})"] = {"version": version, "url": u}
@@ -99,16 +98,16 @@ def get_latest_downloads(os_key, arch_key):
                 # e.g. https://storage.googleapis.com/.../linux-x64/Antigravity.AppImage -> .../linux-x64/Antigravity.tar.gz
                 base_dir_url = appimage_url.rsplit("/", 1)[0]
                 tar_url = f"{base_dir_url}/Antigravity.tar.gz"
-                results["Antigravity 2 (Tarball Archive)"] = {"version": version, "url": tar_url}
+                results["Antigravity 2 (TAR.GZ)"] = {"version": version, "url": tar_url}
             if deb_url:
-                results["Antigravity 2 (Debian Package)"] = {"version": version, "url": deb_url}
+                results["Antigravity 2 (DEB)"] = {"version": version, "url": deb_url}
             if not appimage_url and not deb_url and urls:
                 results["Antigravity 2"] = {"version": version, "url": urls[0]}
                 
     except Exception as e:
         results[f"Antigravity 2 (App)"] = {"error": f"No build for {os_key}-{arch_key} ({str(e)})"}
 
-    # 2. Fetch Antigravity IDE latest stable version details
+    # 2. Fetch Antigravity IDE latest stable version details via API
     try:
         r = requests.get(MANIFEST_BASE_URLS["Antigravity IDE"], timeout=10)
         r.raise_for_status()
@@ -116,49 +115,47 @@ def get_latest_downloads(os_key, arch_key):
         version_match = re.search(r"Stable Version:\s*(\d+\.\d+(?:\.\d+[a-zA-Z0-9\-]*)?)", text)
         version = version_match.group(1) if version_match else "unknown"
         
-        # Build GCS link depending on OS/arch
+        # Build platform key for IDE update API
         if os_key == "mac":
-            ide_file = "AntigravityIDE-universal.dmg"
-            ide_url = f"https://storage.googleapis.com/antigravity-public/antigravity-ide/{version}/mac-universal/{ide_file}"
+            platform_key = "darwin" if arch_key == "x64" else "darwin-arm64"
         elif os_key == "win":
-            ide_file = "AntigravityIDE-setup.exe"
-            ide_url = f"https://storage.googleapis.com/antigravity-public/antigravity-ide/{version}/win-x64/{ide_file}"
+            platform_key = f"win32-{arch_key}-user"
         else:
-            ide_file = "antigravity-ide.tar.gz"
-            ide_url = f"https://storage.googleapis.com/antigravity-public/antigravity-ide/{version}/linux-{arch_key}/{ide_file}"
+            platform_key = f"linux-{arch_key}"
             
-        results["Antigravity IDE"] = {
+        api_url = f"{MANIFEST_BASE_URLS['Antigravity IDE']}/api/update/{platform_key}/stable/latest"
+        r_api = requests.get(api_url, timeout=10)
+        r_api.raise_for_status()
+        data = r_api.json()
+        
+        ide_url = data.get("url")
+        if not ide_url:
+            raise ValueError(f"No download URL returned by API for platform: {platform_key}")
+            
+        # Determine extension for label
+        ext_label = ""
+        if ide_url:
+            if ide_url.endswith(".dmg"):
+                ext_label = " (DMG)"
+            elif ide_url.endswith(".zip"):
+                ext_label = " (ZIP)"
+            elif ide_url.endswith(".exe"):
+                ext_label = " (EXE)"
+            elif ide_url.endswith(".tar.gz") or ide_url.endswith(".tgz"):
+                ext_label = " (TAR.GZ)"
+            elif "tar.gz" in ide_url.lower():
+                ext_label = " (TAR.GZ)"
+            elif ide_url.endswith(".deb"):
+                ext_label = " (DEB)"
+            elif ide_url.endswith(".AppImage"):
+                ext_label = " (AppImage)"
+                
+        results[f"Antigravity IDE{ext_label}"] = {
             "version": version,
             "url": ide_url
         }
     except Exception as e:
         results["Antigravity IDE"] = {"error": str(e)}
-
-    # 3. Fetch Antigravity CLI latest stable version details
-    try:
-        r = requests.get(MANIFEST_BASE_URLS["Antigravity CLI (agy)"], timeout=10)
-        r.raise_for_status()
-        text = r.text
-        version_match = re.search(r"Stable Version:\s*(\d+\.\d+(?:\.\d+[a-zA-Z0-9\-]*)?)", text)
-        version = version_match.group(1) if version_match else "unknown"
-        
-        # Map CLI binary structure
-        if os_key == "mac":
-            cli_file = "agy"
-            cli_url = f"https://storage.googleapis.com/antigravity-public/antigravity-cli/{version}/mac-{arch_key}/{cli_file}"
-        elif os_key == "win":
-            cli_file = "agy.exe"
-            cli_url = f"https://storage.googleapis.com/antigravity-public/antigravity-cli/{version}/win-{arch_key}/{cli_file}"
-        else:
-            cli_file = "agy"
-            cli_url = f"https://storage.googleapis.com/antigravity-public/antigravity-cli/{version}/linux-{arch_key}/{cli_file}"
-            
-        results["Antigravity CLI (agy)"] = {
-            "version": version,
-            "url": cli_url
-        }
-    except Exception as e:
-        results["Antigravity CLI (agy)"] = {"error": str(e)}
 
     return results
 
@@ -261,4 +258,8 @@ def main():
         print(f"❌ {Colors.RED}Download failed: {e}{Colors.RESET}")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print(f"\n\n{Colors.YELLOW}🛑 Download cancelled by user (Ctrl+C). Exiting...{Colors.RESET}")
+        sys.exit(130)
